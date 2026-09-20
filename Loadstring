@@ -508,7 +508,7 @@ RagdollBtn.Activated:Connect(function()
 end)
 
 KickBtn.Activated:Connect(function()
-	LP:Kick("Disconnected securely by ZJAYRFR HUB ☠️")
+	LP:Kick("Ez steal with ZJAYRFR HUB ☠️")
 end)
 
 ToggleBtn.Activated:Connect(function()
