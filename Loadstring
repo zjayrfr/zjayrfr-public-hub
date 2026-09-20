@@ -1,0 +1,516 @@
+-- ULTIMATE CAMERA & AUTO STEAL HUB
+-- MADE BY ZJAYRFR ☠️
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local LP = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ============================================================
+-- AUTO STEAL LOGIC ENGINE (ACTIVE BY DEFAULT)
+-- ============================================================
+local Steal = {
+	AutoStealEnabled = true,
+	StealRadius = 55,
+	StealDuration = 0.1,
+	Mode = "half",
+	HalfFireRange = 10,
+	HalfHoldMin = 1.3,
+	HalfHoldMax = 2.6,
+	HalfEntryDelay = 0.3,
+	Data = {}
+}
+local isStealing = false
+local stealStartTime = nil
+local autoConn = nil
+
+local function isMyPlotByName(plotName)
+	local plots = workspace:FindFirstChild("Plots")
+	if not plots then return false end
+	local plot = plots:FindFirstChild(plotName)
+	if not plot then return false end
+	local sign = plot:FindFirstChild("PlotSign")
+	if sign then
+		local yb = sign:FindFirstChild("YourBase")
+		if yb and yb:IsA("BillboardGui") then return yb.Enabled == true end
+	end
+	return false
+end
+
+local function findNearestPrompt()
+	local char = LP.Character
+	if not char then return nil end
+	local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+	if not root then return nil end
+	local plots = workspace:FindFirstChild("Plots")
+	if not plots then return nil end
+	local nearest, dist = nil, math.huge
+	for _, plot in ipairs(plots:GetChildren()) do
+		if plot:IsA("Model") and not isMyPlotByName(plot.Name) then
+			local pods = plot:FindFirstChild("AnimalPodiums")
+			if pods then
+				for _, pod in ipairs(pods:GetChildren()) do
+					local base = pod:FindFirstChild("Base")
+					local sp = base and base:FindFirstChild("Spawn")
+					if sp then
+						local d = (sp.Position - root.Position).Magnitude
+						if d <= Steal.StealRadius and d < dist then
+							local found = nil
+							local att = sp:FindFirstChild("PromptAttachment")
+							if att then
+								for _, pr in ipairs(att:GetChildren()) do
+									if pr:IsA("ProximityPrompt") and pr.ActionText and pr.ActionText:find("Steal") then found = pr end
+								end
+							end
+							if not found then
+								for _, pr in ipairs(sp:GetDescendants()) do
+									if pr:IsA("ProximityPrompt") and pr.ActionText and pr.ActionText:find("Steal") then found = pr end
+								end
+							end
+							if found then nearest, dist = found, d end
+						end
+					end
+				end
+			end
+		end
+	end
+	return nearest
+end
+
+local function _promptDist(prompt)
+	local char = LP.Character
+	if not char then return math.huge end
+	local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+	if not root then return math.huge end
+	local part = prompt.Parent
+	if part and part:IsA("Attachment") then part = part.Parent end
+	if part and part:IsA("BasePart") then return (part.Position - root.Position).Magnitude end
+	return math.huge
+end
+
+local function executeSteal(prompt)
+	if isStealing then return end
+	if not Steal.Data[prompt] then
+		Steal.Data[prompt] = {hold = {}, trigger = {}, ready = true}
+		if getconnections then
+			for _, c in ipairs(getconnections(prompt.PromptButtonHoldBegan)) do if c.Function then table.insert(Steal.Data[prompt].hold, c.Function) end end
+			for _, c in ipairs(getconnections(prompt.Triggered)) do if c.Function then table.insert(Steal.Data[prompt].trigger, c.Function) end end
+		end
+	end
+	local data = Steal.Data[prompt]
+	if not data.ready then return end
+	data.ready = false
+	isStealing = true
+	stealStartTime = tick()
+	
+	task.spawn(function()
+		for _, fn in ipairs(data.hold) do task.spawn(fn) end
+		task.wait(Steal.HalfHoldMin)
+		local inRange = _promptDist(prompt) <= Steal.HalfFireRange
+		while true do
+			local el = tick() - stealStartTime
+			if el > Steal.HalfHoldMax or not prompt.Parent then break end
+			if _promptDist(prompt) <= Steal.HalfFireRange then
+				if not inRange then task.wait(Steal.HalfEntryDelay) end
+				for _, fn in ipairs(data.trigger) do task.spawn(fn) end
+				break
+			end
+			task.wait()
+		end
+		task.wait(0.05)
+		data.ready = true
+		isStealing = false
+	end)
+end
+
+local function startAutoSteal()
+	if autoConn then return end
+	autoConn = RunService.Heartbeat:Connect(function()
+		if not Steal.AutoStealEnabled or isStealing then return end
+		local p = findNearestPrompt()
+		if p then executeSteal(p) end
+	end)
+end
+
+local function stopAutoSteal()
+	if autoConn then
+		autoConn:Disconnect()
+		autoConn = nil
+	end
+	isStealing = false
+end
+
+-- ============================================================
+-- ANTI-DIE PROTECTION SYSTEM
+-- ============================================================
+do
+	local connections = {}
+	local function enableAntiDie()
+		local char = LP.Character
+		if not char then return end
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if not hum then return end
+
+		local healthConn = hum:GetPropertyChangedSignal("Health"):Connect(function()
+			if hum.Health <= 0 then hum.Health = hum.MaxHealth end
+		end)
+		table.insert(connections, healthConn)
+
+		local diedConn = hum.Died:Connect(function()
+			task.wait()
+			pcall(function()
+				local newHum = Instance.new("Humanoid")
+				newHum.Name = "Humanoid"
+				newHum.Parent = char
+				if workspace.CurrentCamera then
+					workspace.CurrentCamera.CameraSubject = newHum
+				end
+				hum:Destroy()
+			end)
+		end)
+		table.insert(connections, diedConn)
+	end
+
+	local function setup()
+		for _, conn in pairs(connections) do pcall(conn.Disconnect, conn) end
+		connections = {}
+		enableAntiDie()
+	end
+
+	setup()
+	LP.CharacterAdded:Connect(function()
+		task.wait(0.1)
+		setup()
+	end)
+end
+
+-- ============================================================
+-- ADVANCED ANTI-RAGDOLL ENGINE
+-- ============================================================
+local RagdollActive = true
+local resetCooldown = 0
+local antiRagdollConn = nil
+
+local function forceReset()
+	local char = LP.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local root = char:FindFirstChild("HumanoidRootPart")
+	if not hum or not root or hum.Health <= 0 then return end
+
+	pcall(function()
+		hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+		root.Velocity = Vector3.zero
+		root.RotVelocity = Vector3.zero
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+
+		for _, obj in ipairs(char:GetDescendants()) do
+			if obj:IsA("Motor6D") then obj.Enabled = true end
+			if obj:IsA("Constraint") then obj.Enabled = true end
+		end
+
+		workspace.CurrentCamera.CameraSubject = hum
+
+		local PM = LP.PlayerScripts:FindFirstChild("PlayerModule")
+		if PM then
+			local CM = require(PM:FindFirstChild("ControlModule"))
+			if CM then CM:Enable() end
+		end
+
+		hum.AutoRotate = true
+		hum.PlatformStand = false
+		hum.Sit = false
+	end)
+end
+
+local function startAntiRagdoll()
+	if antiRagdollConn then return end
+	antiRagdollConn = RunService.Heartbeat:Connect(function()
+		if not RagdollActive then return end
+		local char = LP.Character
+		if not char then return end
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then return end
+
+		local state = hum:GetState()
+		local isRagdolled = (state == Enum.HumanoidStateType.Physics or
+							 state == Enum.HumanoidStateType.Ragdoll or
+							 state == Enum.HumanoidStateType.FallingDown)
+
+		if isRagdolled then
+			local now = tick()
+			if now - resetCooldown > 0.15 then
+				resetCooldown = now
+				forceReset()
+			end
+		end
+	end)
+end
+
+local function stopAntiRagdoll()
+	if antiRagdollConn then
+		antiRagdollConn:Disconnect()
+		antiRagdollConn = nil
+	end
+end
+
+-- ============================================================
+-- GRAPHICAL INTERFACE
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "Zjayrfr_Premium_Hub"
+ScreenGui.ResetOnSpawn = false
+
+if gethui then ScreenGui.Parent = gethui()
+elseif game:GetService("CoreGui") then pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
+else ScreenGui.Parent = LP:WaitForChild("PlayerGui") end
+
+local function MakeDraggable(guiObject)
+	local dragging, dragInput, dragStart, startPos
+	guiObject.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; dragStart = input.Position; startPos = guiObject.Position
+			input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+		end
+	end)
+	guiObject.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			guiObject.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+-- MAIN HUB FRAME
+local Main = Instance.new("Frame")
+Main.Name = "MainFrame"
+Main.Size = UDim2.new(0, 260, 0, 250)
+Main.Position = UDim2.new(0.5, -130, 0.35, 0)
+Main.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+Main.BorderSizePixel = 0
+Main.Visible = false
+Main.Parent = ScreenGui
+MakeDraggable(Main)
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 16)
+MainCorner.Parent = Main
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Thickness = 2
+MainStroke.Color = Color3.fromRGB(55, 55, 65)
+MainStroke.Parent = Main
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 45)
+Title.Text = "ZJAYRFR HUB ☠️"
+Title.Font = Enum.Font.GothamBlack
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.BackgroundTransparency = 1
+Title.TextSize = 17
+Title.Parent = Main
+
+-- NOCLIP BUTTON
+local NoclipBtn = Instance.new("TextButton")
+NoclipBtn.Size = UDim2.new(0.85, 0, 0, 42)
+NoclipBtn.Position = UDim2.new(0.075, 0, 0.20, 0)
+NoclipBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+NoclipBtn.Text = "CAMERA NOCLIP: ON"
+NoclipBtn.Font = Enum.Font.GothamBlack
+NoclipBtn.TextColor3 = Color3.fromRGB(60, 255, 120)
+NoclipBtn.TextSize = 13
+NoclipBtn.AutoButtonColor = false
+NoclipBtn.Parent = Main
+
+local NoclipCorner = Instance.new("UICorner")
+NoclipCorner.CornerRadius = UDim.new(0, 10)
+NoclipCorner.Parent = NoclipBtn
+
+local NoclipStroke = Instance.new("UIStroke")
+NoclipStroke.Thickness = 1.5
+NoclipStroke.Color = Color3.fromRGB(60, 255, 120)
+NoclipStroke.Parent = NoclipBtn
+
+-- STEAL BUTTON
+local StealBtn = Instance.new("TextButton")
+StealBtn.Size = UDim2.new(0.85, 0, 0, 42)
+StealBtn.Position = UDim2.new(0.075, 0, 0.40, 0)
+StealBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+StealBtn.Text = "AUTO STEAL: ON"
+StealBtn.Font = Enum.Font.GothamBlack
+StealBtn.TextColor3 = Color3.fromRGB(60, 255, 120)
+StealBtn.TextSize = 13
+StealBtn.AutoButtonColor = false
+StealBtn.Parent = Main
+
+local StealCorner = Instance.new("UICorner")
+StealCorner.CornerRadius = UDim.new(0, 10)
+StealCorner.Parent = StealBtn
+
+local StealStroke = Instance.new("UIStroke")
+StealStroke.Thickness = 1.5
+StealStroke.Color = Color3.fromRGB(60, 255, 120)
+StealStroke.Parent = StealBtn
+
+-- RAGDOLL BUTTON
+local RagdollBtn = Instance.new("TextButton")
+RagdollBtn.Size = UDim2.new(0.85, 0, 0, 42)
+RagdollBtn.Position = UDim2.new(0.075, 0, 0.60, 0)
+RagdollBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+RagdollBtn.Text = "ANTI RAGDOLL: ON"
+RagdollBtn.Font = Enum.Font.GothamBlack
+RagdollBtn.TextColor3 = Color3.fromRGB(60, 255, 120)
+RagdollBtn.TextSize = 13
+RagdollBtn.AutoButtonColor = false
+RagdollBtn.Parent = Main
+
+local RagdollCorner = Instance.new("UICorner")
+RagdollCorner.CornerRadius = UDim.new(0, 10)
+RagdollCorner.Parent = RagdollBtn
+
+local RagdollStroke = Instance.new("UIStroke")
+RagdollStroke.Thickness = 1.5
+RagdollStroke.Color = Color3.fromRGB(60, 255, 120)
+RagdollStroke.Parent = RagdollBtn
+
+local Credits = Instance.new("TextLabel")
+Credits.Size = UDim2.new(1, 0, 0, 30)
+Credits.Position = UDim2.new(0, 0, 0.84, 0)
+Credits.Text = "MADE BY ZJAYRFR"
+Credits.Font = Enum.Font.GothamBlack
+Credits.BackgroundTransparency = 1
+Credits.TextSize = 11
+Credits.Parent = Main
+
+-- MENU TOGGLE BUTTON
+local ToggleBtn = Instance.new("ImageButton")
+ToggleBtn.Name = "OpenCloseToggle"
+ToggleBtn.Size = UDim2.new(0, 48, 0, 48)
+ToggleBtn.Position = UDim2.new(0, 150, 0, 10)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+ToggleBtn.Image = "rbxassetid://135135096595528"
+ToggleBtn.AutoButtonColor = false
+ToggleBtn.Parent = ScreenGui
+
+local CircleCorner = Instance.new("UICorner")
+CircleCorner.CornerRadius = UDim.new(1, 0)
+CircleCorner.Parent = ToggleBtn
+
+local CircleStroke = Instance.new("UIStroke")
+CircleStroke.Thickness = 2
+CircleStroke.Color = Color3.fromRGB(80, 80, 95)
+CircleStroke.Parent = ToggleBtn
+MakeDraggable(ToggleBtn)
+
+-- ============================================================
+-- STANDALONE DRAGGABLE BLACK KICK BUTTON (ALWAYS VISIBLE)
+-- ============================================================
+local KickBtn = Instance.new("TextButton")
+KickBtn.Name = "StandaloneKickBtn"
+KickBtn.Size = UDim2.new(0, 110, 0, 40)
+KickBtn.Position = UDim2.new(1, -125, 0, 10) 
+KickBtn.BackgroundColor3 = Color3.fromRGB(10, 10, 12) 
+KickBtn.Text = "FAST KICK"
+KickBtn.Font = Enum.Font.GothamBlack
+KickBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+KickBtn.TextSize = 12
+KickBtn.AutoButtonColor = false
+KickBtn.Parent = ScreenGui 
+MakeDraggable(KickBtn)
+
+local KickCorner = Instance.new("UICorner")
+KickCorner.CornerRadius = UDim.new(0, 8)
+KickCorner.Parent = KickBtn
+
+local KickStroke = Instance.new("UIStroke")
+KickStroke.Thickness = 1.5
+KickStroke.Color = Color3.fromRGB(60, 60, 70)
+KickStroke.Parent = KickBtn
+
+-- ============================================================
+-- CONTROL LOGIC & INITIAL STATE ACTIVATION
+-- ============================================================
+
+local NoclipActive = true
+
+-- Start systems immediately on execute
+startAutoSteal()
+startAntiRagdoll()
+
+pcall(function() LP.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam end)
+
+RunService.RenderStepped:Connect(function()
+	local hue = tick() % 5 / 5
+	Credits.TextColor3 = Color3.fromHSV(hue, 1, 1)
+
+	if NoclipActive then
+		LP.CameraMaxZoomDistance = 500
+		pcall(function()
+			LP.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+			if Camera.CameraMode == Enum.CameraMode.Classic then
+				Camera.CFrame = Camera.CFrame
+			end
+		end)
+	end
+end)
+
+NoclipBtn.Activated:Connect(function()
+	NoclipActive = not NoclipActive
+	if NoclipActive then
+		NoclipBtn.Text = "CAMERA NOCLIP: ON"
+		NoclipBtn.TextColor3 = Color3.fromRGB(60, 255, 120)
+		NoclipStroke.Color = Color3.fromRGB(60, 255, 120)
+		pcall(function() LP.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam end)
+	else
+		NoclipBtn.Text = "CAMERA NOCLIP: OFF"
+		NoclipBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+		NoclipStroke.Color = Color3.fromRGB(255, 60, 60)
+		pcall(function() LP.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom end)
+	end
+end)
+
+StealBtn.Activated:Connect(function()
+	Steal.AutoStealEnabled = not Steal.AutoStealEnabled
+	if Steal.AutoStealEnabled then
+		StealBtn.Text = "AUTO STEAL: ON"
+		StealBtn.TextColor3 = Color3.fromRGB(60, 255, 120)
+		StealStroke.Color = Color3.fromRGB(60, 255, 120)
+		startAutoSteal()
+	else
+		StealBtn.Text = "AUTO STEAL: OFF"
+		StealBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+		StealStroke.Color = Color3.fromRGB(255, 60, 60)
+		stopAutoSteal()
+	end
+end)
+
+RagdollBtn.Activated:Connect(function()
+	RagdollActive = not RagdollActive
+	if RagdollActive then
+		RagdollBtn.Text = "ANTI RAGDOLL: ON"
+		RagdollBtn.TextColor3 = Color3.fromRGB(60, 255, 120)
+		RagdollStroke.Color = Color3.fromRGB(60, 255, 120)
+		startAntiRagdoll()
+	else
+		RagdollBtn.Text = "ANTI RAGDOLL: OFF"
+		RagdollBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+		RagdollStroke.Color = Color3.fromRGB(255, 60, 60)
+		stopAntiRagdoll()
+	end
+end)
+
+KickBtn.Activated:Connect(function()
+	LP:Kick("Disconnected securely by ZJAYRFR HUB ☠️")
+end)
+
+ToggleBtn.Activated:Connect(function()
+	Main.Visible = not Main.Visible
+end)
